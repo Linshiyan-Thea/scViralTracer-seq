@@ -56,9 +56,6 @@ pip install -r env/requirements.txt
 ```
 .
 ├── README.md
-├── .gitignore
-├── R/
-│   └── common.R                        shared CLI parsing, matrix IO, statistics
 ├── env/
 │   ├── environment.yml                 conda environment for Python and the CLI tools
 │   ├── requirements.txt                pip equivalent for the Python part
