@@ -11,22 +11,10 @@ the pre-infection transcriptome, and the comparison against bulk and droplet-bas
 
 ---
 
-## What is included, and what is not
+## What is included
 
-**Included.** All analysis scripts, their parameter defaults, the shared helper library and
+All analysis scripts, their parameter defaults, the shared helper library and
 the environment specifications.
-
-**Deliberately not included.**
-
-* **Plotting code.** Every script writes result tables and, where a figure depends on a
-  derived quantity, the underlying source data as well. Figures are assembled separately.
-* **Raw data.** FASTQ files and expression matrices are deposited in a public data
-  repository. See the Data Availability statement of the manuscript.
-* **The droplet-based single-cell quantification.** Step 07 can consume either a
-  pre-computed correlation table or an expression matrix, because the upstream 10x
-  Genomics alignment and quantification is a standard published workflow.
-* **Reference genomes.** Build the STAR index from the host annotation and the viral
-  sequences yourself. Step 01 documents the exact reference that was used.
 
 ---
 
