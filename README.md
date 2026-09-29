@@ -9,14 +9,6 @@ QC, separation of infected from bystander cells, differential expression, diffus
 pseudotime, within-cell coupling of host genes to viral load, prediction of viral load from
 the pre-infection transcriptome, and the comparison against bulk and droplet-based data.
 
----
-
-## What is included
-
-All analysis scripts, their parameter defaults, the shared helper library and
-the environment specifications.
-
----
 
 ## Requirements
 
