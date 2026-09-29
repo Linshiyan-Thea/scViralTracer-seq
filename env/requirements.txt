@@ -1,0 +1,9 @@
+# Python dependencies of 04_pseudotime/scanpy_dpt.py
+# Install with:  pip install -r requirements.txt
+# The command line tools in 01_read_processing_and_qc are not installable
+# through pip. Use env/environment.yml or your own package manager for those.
+numpy>=1.23
+pandas>=1.5
+scipy>=1.9
+scanpy>=1.9
+openpyxl>=3.0
