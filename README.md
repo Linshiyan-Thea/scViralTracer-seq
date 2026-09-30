@@ -494,13 +494,6 @@ they are recorded here.
 
 ---
 
-## Citation
-
-If you use this code, please cite the manuscript. The diffusion pseudotime method is
-described in
-
-> Haghverdi L, Büttner M, Wolf FA, Buettner F, Theis FJ. Diffusion pseudotime robustly
-> reconstructs lineage branching. *Nat Methods*. 2016;13(10):845-848. doi:10.1038/nmeth.3971
 
 ## Licence
 
