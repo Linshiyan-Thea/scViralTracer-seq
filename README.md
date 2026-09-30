@@ -1,5 +1,7 @@
 # scViralTracer-seq analysis pipeline
 
+Code accompanying the manuscript **"scViralTracer-seq: single-cell tracing of viral
+infection dynamics via time-resolved RNA-seq"**.
 
 scViralTracer-seq withdraws a defined volume of cytoplasm from one living cell with an
 electric-field-driven nanopipette, so the same cell can be sequenced before infection and
@@ -9,6 +11,26 @@ QC, separation of infected from bystander cells, differential expression, diffus
 pseudotime, within-cell coupling of host genes to viral load, prediction of viral load from
 the pre-infection transcriptome, and the comparison against bulk and droplet-based data.
 
+---
+
+## What is included, and what is not
+
+**Included.** All analysis scripts, their parameter defaults, the shared helper library and
+the environment specifications.
+
+**Deliberately not included.**
+
+* **Plotting code.** Every script writes result tables and, where a figure depends on a
+  derived quantity, the underlying source data as well. Figures are assembled separately.
+* **Raw data.** FASTQ files and expression matrices are deposited in a public data
+  repository.
+* **The droplet-based single-cell quantification.** Step 07 can consume either a
+  pre-computed correlation table or an expression matrix, because the upstream 10x
+  Genomics alignment and quantification is a standard published workflow.
+* **Reference genomes.** Build the STAR index from the host annotation and the viral
+  sequences yourself. Step 01 documents the exact reference that was used.
+
+---
 
 ## Requirements
 
@@ -32,7 +54,7 @@ Used by steps 02, 03, 05, 06 and 07. Tested with R 4.3 and Bioconductor 3.18.
 Rscript env/install_r_packages.R
 ```
 
-This installs `readxl`, `openxlsx`, `data.table`, `mclust`, `glmnet`, `ranger`, `furrr`,
+This installs `readxl`, `openxlsx`, `data.table`, `mclust`, `glmnet`, `furrr`,
 `future` from CRAN and `DESeq2` from Bioconductor, then prints the resolved versions.
 `readxl`, `openxlsx`, `furrr` and `future` are optional and only touched for `.xlsx`
 input, `.xlsx` output, or parallel execution.
@@ -156,11 +178,12 @@ bash 01_read_processing_and_qc/02_library_statistics.sh \
      --work-dir ./work
 ```
 
-The reference is a combined host and viral annotation. The host part is the GENCODE primary
-assembly annotation and the viral part is the eight IAV A/WSN/1933 segments appended as
-extra contigs, so that viral reads are assigned to viral genes instead of being counted as
-unmapped. A third reference, the canine genome, is used only for the stock-purity control
-reported in the supplementary material.
+The reference is a combined host and viral annotation built in-house. The eight IAV
+A/WSN/1933 segments were appended as extra contigs to the human GENCODE v46 primary
+assembly annotation (GRCh38), and the STAR index was built from this merged human + WSN
+reference, so that viral reads are assigned to viral genes instead of being counted as
+unmapped. A third reference, the canine (MDCK) genome, is used only for the stock-purity
+control reported in the supplementary material.
 
 Down-sampling to a common depth is the last stage of step 01 and it matters for this assay.
 Libraries from a single cell differ several-fold in size, and a per-cell comparison of
@@ -352,15 +375,15 @@ Rscript 06_preinfection_prediction/predict_viral_load.R \
 ```
 
 The feature matrix holds the pre-infection expression of every host gene and the target is
-the viral NP expression of the same cell at the late time point. Three models are reported.
+the viral NP expression of the same cell at the late time point. Two results are reported.
 
 1. A univariate screen of every gene. For a single predictor the slope test of a linear
    regression and the test on a Pearson correlation are algebraically identical, so the
    screen is computed vectorised from the correlation.
-2. An elastic net regression with mixing parameter `alpha = 0.5`.
-3. A random forest with permutation importance.
+2. A single multivariate elastic net regression with mixing parameter `alpha = 0.5` and the
+   penalty `lambda` at the cross-validated minimum.
 
-Both multivariate models are reported with their apparent fit **and** with leave-one-out
+The elastic net is reported with its apparent fit **and** with leave-one-out
 cross-validation. With a handful of cells the apparent fit is strongly optimistic, and the
 cross-validated number is the one to quote.
 
@@ -375,10 +398,8 @@ cross-validated number is the one to quote.
 | `--min-r` | 0.65 | absolute Pearson r flagging the top-correlated genes |
 | `--max-fdr` | 0.05 | adjusted p-value used together with `--min-r` |
 | `--alpha` | 0.5 | elastic net mixing parameter |
-| `--n-trees` | 500 | random forest trees |
-| `--min-node-size` | 1 | random forest leaf size |
 | `--cv` | `loocv` | `loocv` or `none` |
-| `--seed` | 1 | seed for the random forest |
+| `--seed` | 1 | seed for the cross-validation fold assignment |
 
 The gene set carried into the enrichment analysis is the one flagged by `--min-r` and
 `--max-fdr`.
@@ -448,7 +469,7 @@ written outside `--output-dir`.
 | 03 | `DESeq2_results.csv`, `DEG_up.csv`, `DEG_down.csv`, `DEG_summary.txt` |
 | 04 | `dpt_data.csv`, `per_cell_trajectory.csv`, `dpt_validation.csv`, `pseudotime_by_timepoint.csv`, `gene_pseudotime_correlation.csv`, `pseudotime_summary.txt`, `anndata.h5ad` |
 | 05 | `per_cell_gene_correlations.csv`, `gene_correlation_summary.csv`, `significant_genes.csv`, `significant_gene_expression.xlsx`, `coupling_summary.txt` |
-| 06 | `single_gene_regression_results.csv`, `model_performance.csv`, `predictions.csv`, `elasticnet_coefficients.csv`, `randomforest_importance.csv`, `all_results.xlsx`, `prediction_summary.txt` |
+| 06 | `single_gene_regression_results.csv`, `model_performance.csv`, `predictions.csv`, `elasticnet_coefficients.csv`, `all_results.xlsx`, `prediction_summary.txt` |
 | 07 | `bulk_all_gene_correlations.csv`, `bulk_significant_genes.csv`, `bulk_query_genes.csv`, `bulk_correlation_summary.txt`, `tenx_all_gene_correlations.csv`, `tenx_significant_genes.csv`, `tenx_top_correlated_genes.csv`, `tenx_query_genes.csv`, `tenx_correlation_report.txt` |
 
 Step 04 additionally writes the UMAP and diffusion coordinates into `dpt_data.csv`. Those
@@ -462,8 +483,8 @@ though the script produces no figure.
 * **No hard-coded paths.** Every input and output location is a command line argument. The
   R scripts locate the shared helper library relative to their own file, so they run from
   any working directory.
-* **Fixed seeds.** Down-sampling uses `--seed`, the random forest uses `--seed`, and every
-  stochastic step of the pseudotime analysis uses `--random-state`.
+* **Fixed seeds.** Down-sampling uses `--seed`, the elastic net cross-validation uses
+  `--seed`, and every stochastic step of the pseudotime analysis uses `--random-state`.
 * **Recorded settings.** Each `*_summary.txt` and `*_report.txt` file restates the
   thresholds and parameters that produced the tables next to it.
 * **Explicit failures.** A sample name that does not follow the convention, a non-integer
