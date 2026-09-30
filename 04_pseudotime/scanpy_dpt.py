@@ -22,8 +22,6 @@ What it does
     7. Correlate the expression of the eight viral genomic segments with
        pseudotime, with Benjamini-Hochberg correction across genes.
 
-    No figure is produced. The UMAP coordinates are written out as source data
-    so that plotting can be done separately.
 
 Input
     A directory holding one count matrix and one FPKM matrix per time point,
