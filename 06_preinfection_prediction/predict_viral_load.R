@@ -17,11 +17,11 @@
 #   3. Screen every gene on its own with a univariate linear regression against
 #      the target, which is equivalent to a Pearson correlation test, and
 #      correct the p-values with the Benjamini-Hochberg procedure.
-#   4. Fit two multivariate models on the same feature set, an elastic net
-#      regression and a random forest, and report both the apparent and the
-#      leave-one-out performance so that the optimistic in-sample fit is never
-#      mistaken for predictive accuracy.
-#   5. Report feature importance from both multivariate models.
+#   4. Fit a single multivariate elastic net regression on the same feature
+#      set, and report both the apparent and the leave-one-out performance so
+#      that the optimistic in-sample fit is never mistaken for predictive
+#      accuracy.
+#   5. Report the elastic net coefficients of the selected genes.
 #
 # Input
 #   --fpkm        gene-by-cell matrix in FPKM holding the PRE-INFECTION
@@ -38,15 +38,14 @@
 #                                       p-value, adjusted p-value and a
 #                                       significant flag
 #   model_performance.csv               apparent and leave-one-out RMSE and
-#                                       R squared for both multivariate models
+#                                       R squared of the elastic net
 #   predictions.csv                     per-cell observed and predicted viral load
 #   elasticnet_coefficients.csv         non-zero coefficients of the elastic net
-#   randomforest_importance.csv         permutation importance of the random forest
 #   all_results.xlsx                    the same tables in one workbook
 #   prediction_summary.txt              settings, performance and top genes
 #
 # Requirements
-#   CRAN: glmnet, ranger
+#   CRAN: glmnet
 #   Optional: openxlsx, needed only to write the .xlsx workbook
 #
 # Usage
@@ -65,12 +64,10 @@
 #   --max-fdr 0.05         adjusted p-value used with --min-r
 #   --alpha 0.5            elastic net mixing parameter. 0.5 balances the ridge
 #                          and the lasso penalty
-#   --n-trees 500          random forest trees
-#   --min-node-size 1      random forest leaf size
-#   --cv loocv|none        leave-one-out cross validation of the multivariate
-#                          models. With a handful of cells this is the only
-#                          honest estimate of performance
-#   --seed 1               seed for the random forest
+#   --cv loocv|none        leave-one-out cross validation of the elastic net.
+#                          With a handful of cells this is the only honest
+#                          estimate of performance
+#   --seed 1               seed for the cross-validation fold assignment
 # ==============================================================================
 
 # Load the shared helpers from the repository root.
@@ -80,7 +77,7 @@ rm(.self)
 
 USAGE <- "Usage: Rscript predict_viral_load.R --fpkm FILE --np-row-6h NAME
        --output-dir DIR [--np-row-3h NAME] [--min-fpkm 1] [--min-cells 3]
-       [--min-r 0.65] [--max-fdr 0.05] [--alpha 0.5] [--n-trees 500]
+       [--min-r 0.65] [--max-fdr 0.05] [--alpha 0.5]
        [--cv loocv|none] [--seed 1]"
 
 opt <- parse_cli(list(
@@ -93,13 +90,11 @@ opt <- parse_cli(list(
   `min-r`         = 0.65,
   `max-fdr`       = 0.05,
   alpha           = 0.5,
-  `n-trees`       = 500L,
-  `min-node-size` = 1L,
   cv              = "loocv",
   seed            = 1L
 ), USAGE)
 
-for (pkg in c("glmnet", "ranger")) {
+for (pkg in c("glmnet")) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     stop("Package '", pkg, "' is required", call. = FALSE)
   }
@@ -254,7 +249,7 @@ step("Fitting the elastic net regression")
 Xf <- X[, is.finite(sx) & sx > 0, drop = FALSE]
 kept_features <- colnames(Xf)
 if (ncol(Xf) < 2) {
-  stop("Fewer than two informative features remain. The multivariate models ",
+  stop("Fewer than two informative features remain. The multivariate model ",
        "cannot be fitted", call. = FALSE)
 }
 
@@ -291,50 +286,12 @@ if (!is.null(enet_model)) {
        nrow(enet_coef))
 }
 
-# ------------------------------------------------- 5. multivariate random forest
-step("Fitting the random forest")
-
-rf_data <- data.frame(NP = y, Xf, check.names = FALSE)
-colnames(rf_data)[-1] <- kept_features
-mtry_val <- max(1L, min(floor(sqrt(ncol(Xf))), ncol(Xf)))
-
-rf_model <- tryCatch(
-  ranger::ranger(NP ~ ., data = rf_data, mtry = mtry_val,
-                 num.trees = opt[["n-trees"]],
-                 importance = "permutation",
-                 min.node.size = opt[["min-node-size"]],
-                 seed = opt$seed),
-  error = function(e) {
-    message("  random forest failed: ", conditionMessage(e))
-    NULL
-  }
-)
-rf_pred <- if (!is.null(rf_model)) {
-  as.numeric(stats::predict(rf_model, data = Xf)$predictions)
-} else {
-  rep(NA_real_, n)
-}
-
-rf_imp <- if (!is.null(rf_model)) {
-  vi <- rf_model$variable.importance
-  data.frame(feature = names(vi), importance = as.numeric(vi),
-             stringsAsFactors = FALSE)
-} else {
-  data.frame(feature = character(), importance = numeric(),
-             stringsAsFactors = FALSE)
-}
-if (nrow(rf_imp)) {
-  rf_imp <- merge(name_map, rf_imp, by = "feature", all.x = FALSE)
-  rf_imp <- rf_imp[order(-rf_imp$importance), ]
-}
-
-# --------------------------------------------- 6. leave-one-out performance ---
+# --------------------------------------------- 5. leave-one-out performance ---
 # Apparent performance is reported for completeness, but with a handful of
 # cells it mostly measures how well the model memorised the data. The
 # leave-one-out figures are the ones that should be quoted.
 do_cv <- tolower(opt$cv) %in% c("loocv", "loo", "cv")
 enet_cv <- rep(NA_real_, n)
-rf_cv <- rep(NA_real_, n)
 
 if (do_cv && n >= 4) {
   step("Leave-one-out cross validation across ", n, " cells")
@@ -348,29 +305,16 @@ if (do_cv && n >= 4) {
       enet_cv[i] <- as.numeric(stats::predict(enet_i,
                                               newx = Xf[i, , drop = FALSE]))
     }
-
-    rf_i <- tryCatch(
-      ranger::ranger(NP ~ ., data = rf_data[idx, , drop = FALSE],
-                     mtry = mtry_val, num.trees = opt[["n-trees"]],
-                     min.node.size = opt[["min-node-size"]],
-                     seed = opt$seed),
-      error = function(e) NULL)
-    if (!is.null(rf_i)) {
-      rf_cv[i] <- as.numeric(stats::predict(rf_i,
-                                            data = Xf[i, , drop = FALSE])$predictions)
-    }
   }
 } else if (do_cv) {
   note("Too few cells for leave-one-out cross validation, skipped")
 }
 
 perf <- data.frame(
-  Model = c("Elastic net", "Elastic net", "Random forest", "Random forest"),
-  Evaluation = c("apparent", "leave-one-out", "apparent", "leave-one-out"),
-  RMSE = c(rmse(y, enet_pred), rmse(y, enet_cv),
-           rmse(y, rf_pred), rmse(y, rf_cv)),
-  R_squared = c(r_squared(y, enet_pred), r_squared(y, enet_cv),
-                r_squared(y, rf_pred), r_squared(y, rf_cv)),
+  Model = c("Elastic net", "Elastic net"),
+  Evaluation = c("apparent", "leave-one-out"),
+  RMSE = c(rmse(y, enet_pred), rmse(y, enet_cv)),
+  R_squared = c(r_squared(y, enet_pred), r_squared(y, enet_cv)),
   stringsAsFactors = FALSE
 )
 if (!do_cv) perf$R_squared[perf$Evaluation == "leave-one-out"] <- NA_real_
@@ -382,14 +326,12 @@ for (i in seq_len(nrow(perf))) {
                fmt_num(perf$RMSE[i], 4), fmt_num(perf$R_squared[i], 4)))
 }
 
-# --------------------------------------------------------------- 7. outputs ---
+# --------------------------------------------------------------- 6. outputs ---
 predictions <- data.frame(
   cell = cells,
   observed_viral_load = y,
   elasticnet_apparent = enet_pred,
   elasticnet_loo = enet_cv,
-  randomforest_apparent = rf_pred,
-  randomforest_loo = rf_cv,
   stringsAsFactors = FALSE
 )
 if (!all(is.na(np_mid))) predictions$intermediate_viral_load <- np_mid
@@ -397,14 +339,12 @@ if (!all(is.na(np_mid))) predictions$intermediate_viral_load <- np_mid
 write_table(perf, file.path(opt[["output-dir"]], "model_performance.csv"))
 write_table(predictions, file.path(opt[["output-dir"]], "predictions.csv"))
 write_table(enet_coef, file.path(opt[["output-dir"]], "elasticnet_coefficients.csv"))
-write_table(rf_imp, file.path(opt[["output-dir"]], "randomforest_importance.csv"))
 
 if (requireNamespace("openxlsx", quietly = TRUE)) {
   sheets <- list(Univariate_screening = univariate,
                  Model_performance = perf,
                  Predictions = predictions,
-                 ElasticNet_coefficients = enet_coef,
-                 RandomForest_importance = rf_imp)
+                 ElasticNet_coefficients = enet_coef)
   out_xlsx <- file.path(opt[["output-dir"]], "all_results.xlsx")
   openxlsx::write.xlsx(sheets, out_xlsx)
   message("  written: ", out_xlsx)
@@ -412,7 +352,7 @@ if (requireNamespace("openxlsx", quietly = TRUE)) {
   note("Package 'openxlsx' is not installed, the combined workbook was skipped")
 }
 
-# --------------------------------------------------------------- 8. summary ---
+# --------------------------------------------------------------- 7. summary ---
 lines <- c(
   strrep("=", 64),
   "Pre-infection prediction of viral load",
@@ -457,14 +397,11 @@ if (n_sig > 0) {
 
 lines <- c(lines, "",
   strrep("-", 64),
-  "Multivariate models",
+  "Multivariate model",
   strrep("-", 64),
   paste0("  elastic net alpha    : ", opt$alpha),
   paste0("  lambda selection     : cv.glmnet, lambda.min, ",
          min(10L, n), "-fold"),
-  paste0("  random forest trees  : ", opt[["n-trees"]]),
-  paste0("  random forest mtry   : ", mtry_val),
-  paste0("  min node size        : ", opt[["min-node-size"]]),
   paste0("  cross validation     : ", if (do_cv) "leave-one-out" else "none"),
   paste0("  seed                 : ", opt$seed),
   "")
@@ -485,15 +422,6 @@ if (nrow(enet_coef) > 0) {
       lines <- c(lines, sprintf("    %-16s %+10.4f", nz$gene_name[i],
                                 nz$coefficient[i]))
     }
-  }
-}
-
-if (nrow(rf_imp) > 0) {
-  lines <- c(lines, "", "  Top 15 random forest permutation importance")
-  ti <- utils::head(rf_imp, 15)
-  for (i in seq_len(nrow(ti))) {
-    lines <- c(lines, sprintf("    %-16s %12.4f", ti$gene_name[i],
-                              ti$importance[i]))
   }
 }
 
