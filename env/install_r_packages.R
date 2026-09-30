@@ -16,7 +16,6 @@
 #     data.table    fast grouping of per-cell results   05
 #     mclust        two component Gaussian mixture      02
 #     glmnet        elastic net regression              06
-#     ranger        random forest regression            06
 #     furrr         parallel map over cells             05, OPTIONAL
 #     future        parallel backend for furrr          05, OPTIONAL
 #
@@ -27,7 +26,7 @@
 # ==============================================================================
 
 cran_pkgs <- c("readxl", "openxlsx", "data.table", "mclust",
-                "glmnet", "ranger", "furrr", "future")
+                "glmnet", "furrr", "future")
 bioc_pkgs <- c("DESeq2")
 
 # ----------------------------------------------------------------- CRAN part ---
